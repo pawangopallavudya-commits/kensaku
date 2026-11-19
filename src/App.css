@@ -194,9 +194,8 @@ html[data-theme="liquid-glass"] body {
 html:is([data-theme="frost"], [data-theme="liquid-glass"]) .glass-window-bg {
   background: transparent;
 }
-
-/* Feature detection and the OS accessibility preference both choose a
-   fully opaque material. Content remains legible if blur is unavailable. */
+/* Feature detection chooses a fully opaque material.
+   Content remains legible if blur is unavailable. */
 html[data-glass-supported="false"]:is([data-theme="frost"], [data-theme="liquid-glass"]) {
   --panel-blur: 0px;
   --panel: var(--bg-elevated);
@@ -211,25 +210,6 @@ html[data-glass-supported="false"][data-theme="liquid-glass"] body {
 
 html[data-glass-supported="false"]:is([data-theme="frost"], [data-theme="liquid-glass"]) .glass-window-bg {
   background: var(--bg);
-}
-
-@media (prefers-reduced-transparency: reduce) {
-  html[data-theme="frost"],
-  html[data-theme="liquid-glass"] {
-    --panel-blur: 0px;
-    --panel: var(--bg-elevated);
-    --control: var(--bg-elevated);
-    --bar: var(--bg);
-  }
-
-  html[data-theme="frost"] body,
-  html[data-theme="liquid-glass"] body {
-    background: var(--bg);
-  }
-
-  html:is([data-theme="frost"], [data-theme="liquid-glass"]) .glass-window-bg {
-    background: var(--bg);
-  }
 }
 
 @theme inline {
