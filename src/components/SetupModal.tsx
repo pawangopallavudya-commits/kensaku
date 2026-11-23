@@ -8,6 +8,7 @@ import { Check, Plus, ArrowRight, ArrowLeft, LoaderCircle, Sun, Moon, Download, 
 import { useTheme } from "../hooks/useTheme";
 import { WindowModePicker } from "./WindowModePicker";
 import type { IndexingStatus, KensakuConfig, OcrEngine, OcrStatus, ModelsStatus } from "../types";
+import { appendUniqueDirectories, validateDirectories } from "../lib/setupDirectories";
 
 /* First run: three screens, one decision each.
    1 Welcome → 2 Pick folders → 3 Exclusions + start. */
@@ -276,7 +277,7 @@ export function SetupModal({ onSetupCompleted }: { onSetupCompleted: () => void 
   }, [scanning, done, onSetupCompleted]);
 
   const addDirs = (paths: string[]) =>
-    setSelectedDirs((prev) => [...prev, ...paths.filter((p) => !prev.includes(p))]);
+    setSelectedDirs((prev) => appendUniqueDirectories(prev, paths));
 
   const toggleNameOnly = (dir: string) =>
     setNameOnlyDirs((prev) =>
@@ -292,17 +293,27 @@ export function SetupModal({ onSetupCompleted }: { onSetupCompleted: () => void 
      dev preview (mockTauri) only pays for it when the picker is used. */
   const browseForFolder = async () => {
     setDirError(null);
+    let picked: string | string[] | null;
     try {
       const { open } = await import("@tauri-apps/plugin-dialog");
-      const picked = await open({
+      picked = await open({
         directory: true,
         multiple: true,
         title: t("folders.browseTitle"),
       });
-      if (!picked) return;
-      addDirs(Array.isArray(picked) ? picked : [picked]);
     } catch (err) {
       setDirError(t("folders.pickerUnavailable", { error: String(err) }));
+      return;
+    }
+    if (!picked) return;
+    try {
+      const paths = await validateDirectories(
+        Array.isArray(picked) ? picked : [picked],
+        (path) => invoke<string>("validate_directory", { path }),
+      );
+      addDirs(paths);
+    } catch (err) {
+      setDirError(String(err));
     }
   };
 
