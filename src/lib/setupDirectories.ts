@@ -16,6 +16,23 @@ export function appendUniqueDirectories(
 export function validateDirectories(
   paths: readonly string[],
   validateDirectory: (path: string) => Promise<string>,
-): Promise<string[]> {
-  return Promise.all(paths.map(validateDirectory));
+): Promise<{ directories: string[]; errors: { path: string; error: unknown }[] }> {
+  return Promise.allSettled(
+    paths.map((path) => Promise.resolve().then(() => validateDirectory(path))),
+  ).then((results) => {
+    const directories: string[] = [];
+    const errors: { path: string; error: unknown }[] = [];
+    const seen = new Set<string>();
+
+    results.forEach((result, index) => {
+      if (result.status === "rejected") {
+        errors.push({ path: paths[index], error: result.reason });
+      } else if (!seen.has(result.value)) {
+        seen.add(result.value);
+        directories.push(result.value);
+      }
+    });
+
+    return { directories, errors };
+  });
 }

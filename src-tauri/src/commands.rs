@@ -1156,24 +1156,39 @@ fn canonical_directory(candidate: &Path) -> Result<PathBuf, String> {
     if !candidate.is_dir() {
         return Err(format!("Not a folder: {}", candidate.display()));
     }
-    let mut canonical = candidate
+    let canonical = candidate
         .canonicalize()
         .map_err(|e| format!("Could not resolve {}: {}", candidate.display(), e))?
         .to_string_lossy()
         .to_string();
-    // Windows canonicalize() returns an extended-length path (\\?\C:\...);
-    // every other command and the UI expect the plain form.
-    if let Some(stripped) = canonical.strip_prefix("\\\\?\\") {
+    Ok(PathBuf::from(normalize_canonical_directory(canonical)))
+}
+
+fn normalize_canonical_directory(mut canonical: String) -> String {
+    // Preserve UNC paths while removing the Windows extended-length prefix.
+    if let Some(unc) = canonical.strip_prefix("\\\\?\\UNC\\") {
+        canonical = format!("\\\\{unc}");
+    } else if let Some(stripped) = canonical.strip_prefix("\\\\?\\") {
         canonical = stripped.to_string();
     }
-    Ok(PathBuf::from(canonical))
+    // Windows canonicalize() returns an extended-length path (\\?\C:\...);
+    // every other command and the UI expect the plain form.
+    canonical
 }
 
 fn canonicalize_unique_directories(directories: Vec<String>) -> Result<Vec<PathBuf>, String> {
     let mut seen = std::collections::HashSet::new();
     let mut unique = Vec::with_capacity(directories.len());
     for directory in directories {
-        let canonical = canonical_directory(Path::new(&directory))?;
+        let candidate = Path::new(&directory);
+        let canonical = match canonical_directory(candidate) {
+            Ok(canonical) => canonical,
+            Err(error) if !candidate.exists() => {
+                log::warn!("Skipping unavailable setup folder {directory}: {error}");
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
         if seen.insert(canonical.clone()) {
             unique.push(canonical);
         }
@@ -1767,9 +1782,37 @@ mod tests {
 
         assert_eq!(
             paths,
-            vec![docs.canonicalize().unwrap(), photos.canonicalize().unwrap()]
+            vec![
+                canonical_directory(&docs).unwrap(),
+                canonical_directory(&photos).unwrap()
+            ]
         );
 
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn canonical_directory_preserves_unc_share_paths() {
+        assert_eq!(
+            normalize_canonical_directory("\\\\?\\UNC\\server\\share\\folder".to_string()),
+            "\\\\server\\share\\folder"
+        );
+    }
+
+    #[test]
+    fn setup_directories_skip_paths_missing_at_completion() {
+        let root = temp_path("setup");
+        let docs = root.join("docs");
+        std::fs::create_dir_all(&docs).unwrap();
+        let missing = root.join("ejected");
+
+        let paths = canonicalize_unique_directories(vec![
+            docs.to_string_lossy().into_owned(),
+            missing.to_string_lossy().into_owned(),
+        ])
+        .expect("an unavailable setup folder should not block setup");
+
+        assert_eq!(paths, vec![canonical_directory(&docs).unwrap()]);
         let _ = std::fs::remove_dir_all(&root);
     }
 

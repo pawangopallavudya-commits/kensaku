@@ -112,8 +112,12 @@ export function SetupModal({ onSetupCompleted }: { onSetupCompleted: () => void 
 
   useEffect(() => {
     invoke<string[]>("get_suggested_directories")
-      .then((dirs) => {
-        setSuggestedDirs(dirs);
+      .then(async (dirs) => {
+        const { directories } = await validateDirectories(
+          dirs,
+          (path) => invoke<string>("validate_directory", { path }),
+        );
+        setSuggestedDirs(directories);
         // Suggested folders are shown for convenience, but nothing is selected
         // by default: the user must explicitly choose what to index.
       })
@@ -279,6 +283,17 @@ export function SetupModal({ onSetupCompleted }: { onSetupCompleted: () => void 
   const addDirs = (paths: string[]) =>
     setSelectedDirs((prev) => appendUniqueDirectories(prev, paths));
 
+  const translateDirectoryError = (error: unknown, path: string) => {
+    const message = String(error);
+    if (/^Folder not found:/i.test(message)) {
+      return t("folders.folderNotFound", { path });
+    }
+    if (/^Not a folder:/i.test(message)) {
+      return t("folders.notDirectory", { path });
+    }
+    return t("folders.validationFailed", { path });
+  };
+
   const toggleNameOnly = (dir: string) =>
     setNameOnlyDirs((prev) =>
       prev.includes(dir) ? prev.filter((d) => d !== dir) : [...prev, dir],
@@ -307,13 +322,20 @@ export function SetupModal({ onSetupCompleted }: { onSetupCompleted: () => void 
     }
     if (!picked) return;
     try {
-      const paths = await validateDirectories(
+      const { directories, errors } = await validateDirectories(
         Array.isArray(picked) ? picked : [picked],
         (path) => invoke<string>("validate_directory", { path }),
       );
-      addDirs(paths);
+      addDirs(directories);
+      if (errors.length) {
+        setDirError(
+          errors
+            .map(({ path, error }) => translateDirectoryError(error, path))
+            .join("  ·  "),
+        );
+      }
     } catch (err) {
-      setDirError(String(err));
+      setDirError(translateDirectoryError(err, ""));
     }
   };
 
@@ -325,19 +347,25 @@ export function SetupModal({ onSetupCompleted }: { onSetupCompleted: () => void 
     if (!raw || dirBusy) return;
     setDirBusy(true);
     setDirError(null);
-    const ok: string[] = [];
-    const failed: string[] = [];
-    for (const part of raw.split(/[,;]/).map((s) => s.trim()).filter(Boolean)) {
-      try {
-        ok.push(await invoke<string>("validate_directory", { path: part }));
-      } catch (err) {
-        failed.push(String(err));
+    try {
+      const { directories, errors } = await validateDirectories(
+        raw.split(/[,;]/).map((s) => s.trim()).filter(Boolean),
+        (path) => invoke<string>("validate_directory", { path }),
+      );
+      if (directories.length) addDirs(directories);
+      setCustomDirInput("");
+      if (errors.length) {
+        setDirError(
+          errors
+            .map(({ path, error }) => translateDirectoryError(error, path))
+            .join("  ·  "),
+        );
       }
+    } catch (err) {
+      setDirError(translateDirectoryError(err, ""));
+    } finally {
+      setDirBusy(false);
     }
-    if (ok.length) addDirs(ok);
-    setCustomDirInput("");
-    if (failed.length) setDirError(failed.join("  ·  "));
-    setDirBusy(false);
   };
 
   const handleFinish = async () => {
@@ -568,7 +596,7 @@ export function SetupModal({ onSetupCompleted }: { onSetupCompleted: () => void 
             <p className="t-lead text-muted">{t("folders.lead")}</p>
           </div>
           <div className="flex flex-col gap-2">
-            {[...suggestedDirs, ...selectedDirs.filter((d) => !suggestedDirs.includes(d))].map((dir, i) => {
+            {appendUniqueDirectories(suggestedDirs, selectedDirs).map((dir, i) => {
               const selected = selectedDirs.includes(dir);
               const name = dir.split(/[\\/]/).filter(Boolean).pop() || dir;
               return (
